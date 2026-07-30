@@ -3,67 +3,72 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CampusSafe | Student Food Safety Network</title>
+    <title>CampusSafe | FUT Minna Food Safety Register</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=2" />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css?v=3" />
   </head>
   <body>
     <div class="page-shell">
-      <header class="topbar">
+      <header class="masthead">
         <div class="brand">
-          <div class="brand-mark">CS</div>
-          <div>
+          <div class="brand-seal">CS</div>
+          <div class="brand-copy">
             <h1>CampusSafe</h1>
-            <p>Food safety intelligence for campus life</p>
+            <p>Food safety register · FUT Minna</p>
           </div>
         </div>
-        <div class="header-actions">
-          <div class="pill">Student safety dashboard</div>
-          <button id="openReportBtn" class="primary-btn" type="button">Report incident</button>
+        <div class="masthead-actions">
+          <div class="live-indicator"><span class="dot"></span>Live board</div>
+          <button id="openRegisterBtn" class="ghost-btn" type="button">Register a restaurant</button>
+          <button id="openReportBtn" class="primary-btn" type="button">File a report</button>
         </div>
       </header>
 
-      <section class="hero-card">
-        <div class="hero-copy">
-          <span class="pill">Campus safety intelligence</span>
-          <h2>From student concern to swift campus action.</h2>
+      <section class="manifest">
+        <div class="manifest-copy">
+          <span class="eyebrow">Campus safety intelligence</span>
+          <h2>Every report, tracked from the first complaint to the last stamp of review.</h2>
           <p>
-            Students share suspected food poisoning, poor hygiene, or unsafe storage issues,
-            while admin teams review, escalate, and act before the problem spreads.
+            Students file what they saw and felt at a specific place. Admins review, escalate, or
+            close the loop. Nothing about a campus eatery's standing here is guesswork — it's the
+            running record of what students have actually reported.
           </p>
         </div>
-        <div class="hero-stats">
-          <div class="stat-card">
-            <strong id="activeReports">0</strong>
-            <span>Active reports</span>
+        <div class="ledger-strip">
+          <div class="ledger-row">
+            <span class="ledger-label">Active reports</span>
+            <strong id="activeReports" class="ledger-value">0</strong>
           </div>
-          <div class="stat-card">
-            <strong id="riskSpots">0</strong>
-            <span>Hotspots</span>
+          <div class="ledger-row">
+            <span class="ledger-label">Hotspots</span>
+            <strong id="riskSpots" class="ledger-value">0</strong>
           </div>
-          <div class="stat-card">
-            <strong id="responseTime">0m</strong>
-            <span>Avg. response</span>
+          <div class="ledger-row">
+            <span class="ledger-label">Avg. response</span>
+            <strong id="responseTime" class="ledger-value">0m</strong>
           </div>
         </div>
       </section>
 
-      <section class="assistant-card">
-        <div class="panel-header compact">
+      <section class="console">
+        <div class="console-header">
           <div>
-            <h3>CampusSafe AI assistant</h3>
-            <p>Ask Gemma to summarize incidents, rank risks, or recommend the next action.</p>
+            <span class="console-tag">CampusSafe AI</span>
+            <p>Ask it to summarize the risk picture, name the hotspots, or recommend a next move — it pulls live report data before it answers.</p>
           </div>
         </div>
-        <form id="assistantForm" class="assistant-form">
-          <textarea id="assistantInput" rows="3" placeholder="Ask: summarize the current risk profile, identify the hotspots, or recommend next steps."></textarea>
-          <div class="assistant-actions">
-            <button class="primary-btn" type="submit">Ask Gemma</button>
-            <span id="assistantStatus" class="assistant-status">Ready</span>
+        <form id="assistantForm" class="console-form">
+          <div class="console-input-row">
+            <span class="prompt-marker">&gt;</span>
+            <textarea id="assistantInput" rows="2" placeholder="e.g. Which places need attention today, and why?"></textarea>
           </div>
-          <div id="assistantResponse" class="assistant-response">
+          <div class="console-actions">
+            <button class="primary-btn" type="submit">Ask</button>
+            <span id="assistantStatus" class="console-status">Ready</span>
+          </div>
+          <div id="assistantResponse" class="console-response">
             Ask a question to get a live safety summary.
           </div>
         </form>
@@ -74,13 +79,13 @@
           <div class="panel-header">
             <div>
               <h3>Campus restaurants</h3>
-              <p>Browse safety signals and recent incidents in a calm, focused view.</p>
+              <p>Every registered venue's current standing on the board.</p>
             </div>
             <div class="search-wrap">
               <input id="searchInput" type="text" placeholder="Search by name or campus" />
             </div>
           </div>
-          <div id="restaurantList" class="restaurant-list"></div>
+          <div id="restaurantList" class="placard-grid"></div>
         </div>
 
         <div class="side-stack">
@@ -91,19 +96,18 @@
                 <p>Recent alerts from the student community.</p>
               </div>
             </div>
-            <div id="reportFeed" class="report-feed"></div>
+            <div id="reportFeed" class="wire-feed"></div>
           </div>
-          <div class="panel">
+          <div class="panel note-panel">
             <div class="panel-header compact">
               <div>
-                <h3>Why this product matters</h3>
-                <p>A clear channel for community safety without fear of being ignored.</p>
+                <h3>Why this exists</h3>
               </div>
             </div>
             <ul class="info-list">
-              <li>Students can flag symptoms, hygiene concerns, and suspected contamination.</li>
-              <li>Admins can review patterns and act before a problem spreads.</li>
-              <li>Dining spots gain trust through transparent, visible accountability.</li>
+              <li>Students flag symptoms, hygiene concerns, and suspected contamination as they happen.</li>
+              <li>Admins review the pattern and act before it spreads across campus.</li>
+              <li>Every venue earns its standing in the open, not behind closed doors.</li>
             </ul>
           </div>
         </div>
@@ -113,11 +117,11 @@
         <div class="panel">
           <div class="panel-header">
             <div>
-              <h3>Review queue</h3>
-              <p>Approve, escalate, or dismiss safety reports.</p>
+              <h3>Review docket</h3>
+              <p>Approve, escalate, or dismiss incoming reports.</p>
             </div>
           </div>
-          <div id="reviewQueue" class="review-queue"></div>
+          <div id="reviewQueue" class="docket"></div>
         </div>
 
         <div class="side-stack">
@@ -128,19 +132,23 @@
                 <p>Campus-level safety signals at a glance.</p>
               </div>
             </div>
-            <div id="analyticsCards" class="analytics-grid"></div>
+            <div id="analyticsCards" class="ledger-mini"></div>
           </div>
           <div class="panel">
             <div class="panel-header compact">
               <div>
                 <h3>Risk hotspots</h3>
-                <p>Most urgent locations needing attention.</p>
+                <p>Ranked by current safety score, lowest first.</p>
               </div>
             </div>
             <div id="riskList" class="risk-list"></div>
           </div>
         </div>
       </section>
+
+      <footer class="page-footer">
+        <span>CampusSafe — built for the Build with Gemma: AI for Africa Hackathon.</span>
+      </footer>
     </div>
 
     <div id="reportModal" class="modal hidden">
@@ -184,6 +192,30 @@
       </div>
     </div>
 
-    <script src="app.js?v=2"></script>
+    <div id="registerModal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Register a restaurant</h3>
+          <button id="closeRegisterModalBtn" class="icon-btn" type="button">×</button>
+        </div>
+        <form id="registerForm">
+          <label>
+            Restaurant name
+            <input id="restaurantNameInput" type="text" placeholder="e.g. Unique Kitchen" required />
+          </label>
+          <label>
+            Campus location
+            <input id="restaurantCampusInput" type="text" placeholder="e.g. Gidan Kwano Campus" required />
+          </label>
+          <p class="field-note">New venues join the board at a clean 100/100 score until reports come in.</p>
+          <div class="modal-actions">
+            <button type="button" id="cancelRegisterBtn" class="secondary-btn">Cancel</button>
+            <button type="submit" class="primary-btn">Add to board</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="app.js?v=3"></script>
   </body>
 </html>

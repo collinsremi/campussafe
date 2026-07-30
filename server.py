@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import request as urllib_request
+from urllib import error as urllib_error
 
 ROOT = Path(__file__).parent.resolve()
 ENV_PATH = ROOT / ".env"
@@ -37,23 +38,27 @@ GEMMA_MODEL = "gemma-3-27b-it"
 
 # =============================================================================
 # SHARED STATE — this file (data.json) is the one source of truth for every
-# visitor. Previously this app used the browser's localStorage, which meant
-# every visitor had their own private copy and never saw anyone else's
-# reports. That defeats the entire purpose of a shared safety board, so all
-# reads and writes now go through here instead.
+# visitor. Reads and writes all go through here so every visitor sees the
+# same restaurants and reports instead of a private per-browser copy.
+#
+# Seed data below is the real FUT Minna restaurant set — swap in more, or
+# let admins add them live via "Register a restaurant" in the UI, which
+# posts to /api/restaurants and appends to this same file.
 # =============================================================================
 
 INITIAL_STATE = {
     "restaurants": [
-        {"id": 1, "name": "The Green Table", "campus": "North Hall", "rating": 4.8, "safety": "Safe", "reports": 2, "score": 92, "alerts": 0},
-        {"id": 2, "name": "Crisp Bites", "campus": "Library Quad", "rating": 4.2, "safety": "Watch", "reports": 5, "score": 74, "alerts": 2},
-        {"id": 3, "name": "Noodle House", "campus": "Engineering Block", "rating": 3.9, "safety": "Alert", "reports": 8, "score": 61, "alerts": 4},
-        {"id": 4, "name": "Sunset Grill", "campus": "Student Center", "rating": 4.7, "safety": "Safe", "reports": 1, "score": 95, "alerts": 0}
+        {"id": 1, "name": "Unique Kitchen", "campus": "Gidan Kwano Campus", "rating": 4.6, "safety": "Safe", "reports": 2, "score": 91, "alerts": 0},
+        {"id": 2, "name": "Mama Abbas", "campus": "Gidan Kwano Campus", "rating": 4.4, "safety": "Watch", "reports": 3, "score": 84, "alerts": 1},
+        {"id": 3, "name": "Pop Area", "campus": "Bosso Campus", "rating": 4.1, "safety": "Alert", "reports": 6, "score": 69, "alerts": 3},
+        {"id": 4, "name": "Asadel", "campus": "Bosso Campus", "rating": 4.7, "safety": "Safe", "reports": 1, "score": 95, "alerts": 0},
+        {"id": 5, "name": "Food Republic", "campus": "Gidan Kwano Campus", "rating": 3.9, "safety": "Watch", "reports": 5, "score": 73, "alerts": 2},
+        {"id": 6, "name": "Delight", "campus": "Bosso Campus", "rating": 4.5, "safety": "Safe", "reports": 2, "score": 88, "alerts": 0}
     ],
     "reports": [
-        {"id": 1, "restaurantId": 2, "restaurant": "Crisp Bites", "concern": "Food poisoning", "severity": "High", "details": "Several students reported nausea after the evening special.", "time": "12m ago", "status": "pending"},
-        {"id": 2, "restaurantId": 3, "restaurant": "Noodle House", "concern": "Cold storage", "severity": "Medium", "details": "A staff member noted that dumplings were left out too long.", "time": "43m ago", "status": "reviewed"},
-        {"id": 3, "restaurantId": 1, "restaurant": "The Green Table", "concern": "Poor hygiene", "severity": "Low", "details": "Cutlery station lacked regular sanitizing.", "time": "1h ago", "status": "pending"}
+        {"id": 1, "restaurantId": 3, "restaurant": "Pop Area", "concern": "Food poisoning", "severity": "High", "details": "Several students reported nausea after the evening special.", "time": "12m ago", "status": "pending"},
+        {"id": 2, "restaurantId": 5, "restaurant": "Food Republic", "concern": "Cold storage", "severity": "Medium", "details": "A staff member noted that stew was left out too long before serving.", "time": "43m ago", "status": "reviewed"},
+        {"id": 3, "restaurantId": 2, "restaurant": "Mama Abbas", "concern": "Poor hygiene", "severity": "Low", "details": "Cutlery station lacked regular sanitizing during the lunch rush.", "time": "1h ago", "status": "pending"}
     ]
 }
 
@@ -93,7 +98,7 @@ def get_content_type(path: str) -> str:
 
 
 def get_config():
-    api_key = os.getenv("GEMMA_API_KEY") or ENV_VALUES.get("GEMMA_API_KEY", "")
+    api_key = get_api_key()
     return {
         "enabled": bool(api_key),
         "apiKeyPresent": bool(api_key),
@@ -106,11 +111,18 @@ def get_api_key():
 
 
 # =============================================================================
-# GEMMA FUNCTION CALLING — the assistant used to paste the entire reports
-# and restaurants arrays into the prompt as raw JSON on every question. That
-# works for a tiny demo dataset, but it's not real integration: Gemma wasn't
-# deciding what data it needed, we were force-feeding all of it every time.
-# These two tools let Gemma pull only what it decides is relevant.
+# GEMMA FUNCTION CALLING — the assistant doesn't get the raw reports/
+# restaurants arrays dumped into the prompt. It gets two tools and decides
+# for itself whether it needs per-restaurant reports or campus-wide
+# hotspots before it answers, then a second call produces the final text.
+#
+# If GEMMA_API_KEY is missing, unauthorized, or the request otherwise
+# fails, call_gemma_api logs *why* to stderr and returns None, and the
+# caller falls back to build_fallback_response. That fallback existing is
+# correct — it means the product still works if Google's API has a bad
+# minute — but if you keep landing on it, check this server's console
+# output for the logged reason (most commonly: the key in .env isn't a
+# valid Google AI Studio key — those start with "AIza", not "AQ.").
 # =============================================================================
 
 TOOLS = [{
@@ -144,14 +156,18 @@ def tool_get_hotspots(state):
     return {"hotspots": [{"name": r["name"], "score": r["score"], "campus": r["campus"]} for r in ranked]}
 
 
-def call_gemma_api(contents, tools=None):
+def call_gemma_api(contents, tools=None, system_instruction=None):
     api_key = get_api_key()
     if not api_key:
+        print("[gemma] no GEMMA_API_KEY found in environment or .env — using fallback")
         return None
+
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMMA_MODEL}:generateContent?key={api_key}"
     payload = {"contents": contents, "generationConfig": {"temperature": 0.2}}
     if tools:
         payload["tools"] = tools
+    if system_instruction:
+        payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
     req = urllib_request.Request(
         endpoint,
@@ -160,9 +176,22 @@ def call_gemma_api(contents, tools=None):
         method="POST",
     )
     try:
-        with urllib_request.urlopen(req, timeout=15) as response:
+        with urllib_request.urlopen(req, timeout=20) as response:
             return json.loads(response.read().decode("utf-8"))
-    except Exception:
+    except urllib_error.HTTPError as e:
+        # This is the one that matters most: it tells you *why* Gemma
+        # rejected the call (bad key, wrong model name, quota, etc).
+        try:
+            detail = e.read().decode("utf-8")
+        except Exception:
+            detail = "<no body>"
+        print(f"[gemma] HTTP {e.code} calling {GEMMA_MODEL}: {detail}")
+        return None
+    except urllib_error.URLError as e:
+        print(f"[gemma] network error calling Gemma API: {e.reason}")
+        return None
+    except Exception as e:
+        print(f"[gemma] unexpected error calling Gemma API: {e}")
         return None
 
 
@@ -217,15 +246,15 @@ def query_gemma(prompt, state):
     if not get_api_key():
         return None
 
-    system_text = (
-        "You are CampusSafe AI, helping review a campus food-safety board. "
-        f"Question: {prompt}\n"
-        "Call get_recent_reports_for_restaurant if the question is about a specific place, "
-        "or get_hotspots if it's about overall risk, before answering. Keep the final answer to 2-4 sentences."
+    system_instruction = (
+        "You are CampusSafe AI, an assistant embedded in a campus food-safety review board. "
+        "Before answering, call get_recent_reports_for_restaurant if the question names a specific "
+        "place, or get_hotspots if it's about overall campus risk. Keep the final answer to 2-4 "
+        "sentences, concrete, and grounded only in the tool data you receive — never invent incidents."
     )
-    contents = [{"role": "user", "parts": [{"text": system_text}]}]
+    contents = [{"role": "user", "parts": [{"text": prompt}]}]
 
-    first = call_gemma_api(contents, tools=TOOLS)
+    first = call_gemma_api(contents, tools=TOOLS, system_instruction=system_instruction)
     if first is None:
         return None
 
@@ -245,12 +274,13 @@ def query_gemma(prompt, state):
             {"role": "user", "parts": [{"functionResponse": {"name": name, "response": {"result": result}}}]},
             {"role": "user", "parts": [{"text": "Now give your final answer, 2-4 sentences."}]}
         ]
-        second = call_gemma_api(follow_up_contents)
+        second = call_gemma_api(follow_up_contents, system_instruction=system_instruction)
         text = extract_text(second)
     else:
         text = extract_text(first)
 
     if not text:
+        print("[gemma] call succeeded but returned no text — falling back")
         return None
     return {"answer": text.strip(), "source": "gemma"}
 
@@ -363,6 +393,38 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(state)
             return
 
+        if path == "/api/restaurants":
+            # Onboarding: lets an admin register a new campus restaurant
+            # straight from the UI instead of editing seed data by hand.
+            # It joins the same shared board everyone else sees.
+            data = self._read_json_body()
+            name = (data.get("name") or "").strip()
+            campus = (data.get("campus") or "").strip()
+            if not name or not campus:
+                self.send_json({"error": "Name and campus location are required"}, status=400)
+                return
+
+            state = read_state()
+            if any(r["name"].strip().lower() == name.lower() for r in state["restaurants"]):
+                self.send_json({"error": "That restaurant is already on the board"}, status=409)
+                return
+
+            next_id = max((r["id"] for r in state["restaurants"]), default=0) + 1
+            new_restaurant = {
+                "id": next_id,
+                "name": name,
+                "campus": campus,
+                "rating": 0,
+                "safety": "Safe",
+                "reports": 0,
+                "score": 100,
+                "alerts": 0
+            }
+            state["restaurants"].append(new_restaurant)
+            write_state(state)
+            self.send_json(state)
+            return
+
         self.send_error(404, "Not Found")
 
     def send_json(self, payload, status=200):
@@ -384,4 +446,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"CampusSafe server running on http://127.0.0.1:{port}")
+    print(f"[gemma] API key present: {bool(get_api_key())} — model: {GEMMA_MODEL}")
     server.serve_forever()

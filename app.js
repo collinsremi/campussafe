@@ -51,28 +51,36 @@ function renderRestaurants() {
   });
 
   const container = document.getElementById('restaurantList');
+  if (!filtered.length) {
+    container.innerHTML = '<div class="empty-state">No restaurants match that search.</div>';
+    return;
+  }
+
   container.innerHTML = filtered.map((restaurant) => {
     const badgeClass = getBadgeClass(restaurant.score);
     return `
-      <article class="restaurant-card">
-        <div class="restaurant-top">
+      <article class="placard">
+        <div class="placard-top">
           <div>
             <h4>${restaurant.name}</h4>
             <p>${restaurant.campus}</p>
           </div>
-          <span class="badge ${badgeClass}">${restaurant.safety}</span>
+          <span class="stamp ${badgeClass}">${restaurant.score}</span>
         </div>
-        <div class="score-line">
-          <span>Safety score</span>
-          <span class="score">${restaurant.score}/100</span>
-        </div>
-        <div class="score-line">
-          <span>Open incidents</span>
-          <span>${restaurant.reports}</span>
-        </div>
-        <div class="score-line">
-          <span>Escalations</span>
-          <span>${restaurant.alerts}</span>
+        <hr class="placard-rule" />
+        <div class="placard-readout">
+          <div class="readout-line">
+            <span>Status</span>
+            <span class="badge ${badgeClass}">${restaurant.safety}</span>
+          </div>
+          <div class="readout-line">
+            <span>Open incidents</span>
+            <span>${restaurant.reports}</span>
+          </div>
+          <div class="readout-line">
+            <span>Escalations</span>
+            <span>${restaurant.alerts}</span>
+          </div>
         </div>
       </article>
     `;
@@ -102,7 +110,7 @@ function renderReviewQueue() {
   const pendingReports = appState.reports.slice().sort((a, b) => (a.status === 'pending' ? -1 : 1));
 
   if (!pendingReports.length) {
-    queue.innerHTML = '<div class="empty-state">The queue is clear.</div>';
+    queue.innerHTML = '<div class="empty-state">The docket is clear.</div>';
     return;
   }
 
@@ -121,7 +129,7 @@ function renderReviewQueue() {
           <button class="action-btn approve" data-action="approve" data-id="${report.id}" type="button">Approve</button>
           <button class="action-btn escalate" data-action="escalate" data-id="${report.id}" type="button">Escalate</button>
           <button class="action-btn dismiss" data-action="dismiss" data-id="${report.id}" type="button">Dismiss</button>
-        ` : `<span class="status-pill ${report.status}">${report.status}</span>`}
+        ` : ''}
       </div>
     </div>
   `).join('');
@@ -144,16 +152,16 @@ function renderAnalytics() {
   const analytics = document.getElementById('analyticsCards');
   analytics.innerHTML = `
     <div class="analytics-card">
-      <strong>${reviewed}</strong>
       <span>Reviewed reports</span>
+      <strong>${reviewed}</strong>
     </div>
     <div class="analytics-card">
-      <strong>${escalated}</strong>
       <span>Escalated alerts</span>
+      <strong>${escalated}</strong>
     </div>
     <div class="analytics-card">
-      <strong>${topConcern[0]}</strong>
       <span>Top concern pattern</span>
+      <strong>${topConcern[0]}</strong>
     </div>
   `;
 
@@ -186,6 +194,15 @@ function closeModal() {
   document.getElementById('reportForm').reset();
 }
 
+function openRegisterModal() {
+  document.getElementById('registerModal').classList.remove('hidden');
+}
+
+function closeRegisterModal() {
+  document.getElementById('registerModal').classList.add('hidden');
+  document.getElementById('registerForm').reset();
+}
+
 async function handleSubmit(event) {
   event.preventDefault();
   const form = event.target;
@@ -214,6 +231,40 @@ async function handleSubmit(event) {
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = 'Submit report';
+  }
+}
+
+async function handleRegisterSubmit(event) {
+  event.preventDefault();
+  const form = event.target;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Adding…';
+
+  try {
+    const res = await fetch('/api/restaurants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: form.restaurantNameInput.value.trim(),
+        campus: form.restaurantCampusInput.value.trim()
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      alert(err.error || 'Could not register that restaurant.');
+      return;
+    }
+
+    appState = await res.json();
+    renderAll();
+    closeRegisterModal();
+  } catch (err) {
+    alert('Could not reach the server — check your connection and try again.');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Add to board';
   }
 }
 
@@ -251,6 +302,15 @@ document.getElementById('reportModal').addEventListener('click', (event) => {
   if (event.target.id === 'reportModal') closeModal();
 });
 document.getElementById('reportForm').addEventListener('submit', handleSubmit);
+
+document.getElementById('openRegisterBtn').addEventListener('click', openRegisterModal);
+document.getElementById('closeRegisterModalBtn').addEventListener('click', closeRegisterModal);
+document.getElementById('cancelRegisterBtn').addEventListener('click', closeRegisterModal);
+document.getElementById('registerModal').addEventListener('click', (event) => {
+  if (event.target.id === 'registerModal') closeRegisterModal();
+});
+document.getElementById('registerForm').addEventListener('submit', handleRegisterSubmit);
+
 document.getElementById('searchInput').addEventListener('input', renderRestaurants);
 document.getElementById('reviewQueue').addEventListener('click', handleReviewAction);
 document.getElementById('assistantForm').addEventListener('submit', submitAssistantQuestion);

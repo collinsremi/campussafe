@@ -10,12 +10,18 @@ Built for the Build with Gemma: AI for Africa Hackathon.
 ## Features
 
 - Live safety board with per-restaurant scores and status (Safe / Watch / Alert)
+- Real FUT Minna restaurants seeded on launch: Unique Kitchen, Mama Abbas,
+  Pop Area, Asadel, Food Republic, Delight — plus a "Register a restaurant"
+  flow so admins can add more without touching code
 - Student incident reporting (concern type, severity, details)
 - Admin review queue — approve, escalate, or dismiss reports
 - Campus-wide analytics: active reports, hotspots, response time, top concern patterns
 - Gemma-powered assistant that answers safety questions using function calling —
   it decides whether to pull recent reports for a specific restaurant or
-  the current campus-wide hotspots before answering
+  the current campus-wide hotspots before answering. If the Gemma call
+  fails for any reason (missing/invalid key, quota, network), the server
+  logs the exact HTTP error to its console and the assistant falls back
+  to a local rule-based summary instead of breaking
 - Shared state across all users — no login required, no per-browser data silos
 
 ## Tech stack
@@ -78,8 +84,18 @@ campussafe/
 | `/api/state` | GET | Current restaurants and reports |
 | `/api/reports` | POST | Submit a new incident report |
 | `/api/reports/<id>/review` | POST | Approve, escalate, or dismiss a report |
+| `/api/restaurants` | POST | Register a new restaurant onto the shared board |
 | `/api/assistant` | POST | Ask Gemma a safety question |
 | `/api/config` | GET | Current model/config status |
+
+### Debugging the assistant
+
+If `/api/assistant` keeps returning `"source": "fallback"`, run the server
+in a terminal (`python3 server.py`) and ask a question — any failed Gemma
+call is logged there with the real reason (e.g. an HTTP 400/403 from
+Google, a bad model name, or no key found). A valid Google AI Studio key
+starts with `AIza`; if yours doesn't, generate a fresh one at
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
 ## Roadmap
 
