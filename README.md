@@ -93,9 +93,12 @@ campussafe/
 If `/api/assistant` keeps returning `"source": "fallback"`, run the server
 in a terminal (`python3 server.py`) and ask a question — any failed Gemma
 call is logged there with the real reason (e.g. an HTTP 400/403 from
-Google, a bad model name, or no key found). A valid Google AI Studio key
-starts with `AIza`; if yours doesn't, generate a fresh one at
-[aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+Google, a bad model name, or no key found). Note that Google AI Studio
+keys now default to the newer `AQ.` "auth key" format rather than the
+older `AIza...` "standard key" format — either can be valid, so don't
+assume a key is bad just because it starts with `AQ.`. This project talks
+to Gemma 4 (`gemma-4-26b-a4b-it`); if you're on an older clone that still
+references `gemma-3-27b-it`, update `GEMMA_MODEL` in `server.py`.
 
 ## Roadmap
 
