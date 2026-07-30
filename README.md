@@ -1,5 +1,8 @@
 # CampusSafe
 
+**Live app:** [campussafe.onrender.com](https://campussafe.onrender.com)
+**Presentation:** [Slides](https://docs.google.com/presentation/d/1J6obNjJXvx_mzI62Trs_9nbmtlFuOhXRjxR70cvKgd8/edit?usp=sharing)
+
 A shared food-safety board for campus life. Students report food poisoning,
 hygiene issues, or unsafe storage at campus restaurants; admins review and
 escalate; Gemma helps surface patterns and answer safety questions across
