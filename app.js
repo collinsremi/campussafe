@@ -16,6 +16,30 @@ function getBadgeClass(score) {
   return 'alert';
 }
 
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function animateLedgerValue(el, nextValue, suffix = '') {
+  const prevValue = Number(el.dataset.value || 0);
+  el.dataset.value = nextValue;
+
+  if (prefersReducedMotion || prevValue === nextValue) {
+    el.textContent = `${nextValue}${suffix}`;
+    return;
+  }
+
+  const duration = 420;
+  const start = performance.now();
+
+  function tick(now) {
+    const progress = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const current = Math.round(prevValue + (nextValue - prevValue) * eased);
+    el.textContent = `${current}${suffix}`;
+    if (progress < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
 async function submitAssistantQuestion(event) {
   event.preventDefault();
   const input = document.getElementById('assistantInput');
@@ -36,7 +60,11 @@ async function submitAssistantQuestion(event) {
 
     const data = await response.json();
     responseBox.textContent = data.answer || 'No answer returned.';
-    statusBox.textContent = data.source === 'gemma' ? 'Live Gemma response' : 'Local fallback response';
+    if (data.source === 'gemma') {
+      statusBox.textContent = 'Live Gemma response';
+    } else {
+      statusBox.textContent = data.debug ? `Local fallback — ${data.debug}` : 'Local fallback response';
+    }
   } catch (error) {
     responseBox.textContent = 'The assistant could not reach the service. Please try again.';
     statusBox.textContent = 'Service unavailable';
@@ -145,9 +173,9 @@ function renderAnalytics() {
   const reviewed = appState.reports.filter((report) => report.status === 'reviewed').length;
   const responseTime = Math.max(8, 18 - Math.min(10, appState.reports.length));
 
-  document.getElementById('activeReports').textContent = appState.reports.filter((report) => report.status !== 'dismissed').length;
-  document.getElementById('riskSpots').textContent = appState.restaurants.filter((restaurant) => restaurant.score < 75).length;
-  document.getElementById('responseTime').textContent = `${responseTime}m`;
+  animateLedgerValue(document.getElementById('activeReports'), appState.reports.filter((report) => report.status !== 'dismissed').length);
+  animateLedgerValue(document.getElementById('riskSpots'), appState.restaurants.filter((restaurant) => restaurant.score < 75).length);
+  animateLedgerValue(document.getElementById('responseTime'), responseTime, 'm');
 
   const analytics = document.getElementById('analyticsCards');
   analytics.innerHTML = `
@@ -314,5 +342,28 @@ document.getElementById('registerForm').addEventListener('submit', handleRegiste
 document.getElementById('searchInput').addEventListener('input', renderRestaurants);
 document.getElementById('reviewQueue').addEventListener('click', handleReviewAction);
 document.getElementById('assistantForm').addEventListener('submit', submitAssistantQuestion);
+
+// Orchestrated entrance: the masthead/hero/console are pure CSS (animate on
+// paint), but the panels below the fold get a scroll-triggered reveal so the
+// page doesn't just dump every section on-screen at once.
+if (!prefersReducedMotion && 'IntersectionObserver' in window) {
+  const revealTargets = document.querySelectorAll('.panel');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in-view');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  revealTargets.forEach((el) => {
+    el.classList.add('reveal');
+    observer.observe(el);
+  });
+} else {
+  document.querySelectorAll('.panel').forEach((el) => el.classList.add('in-view'));
+}
+
+requestAnimationFrame(() => document.body.classList.add('loaded'));
 
 refreshState();
