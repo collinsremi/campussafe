@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CampusSafe | Student Food Safety Network</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css?v=2" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">CS</div>
+          <div>
+            <h1>CampusSafe</h1>
+            <p>Food safety intelligence for campus life</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div class="pill">Student safety dashboard</div>
+          <button id="openReportBtn" class="primary-btn" type="button">Report incident</button>
+        </div>
+      </header>
+
+      <section class="hero-card">
+        <div class="hero-copy">
+          <span class="pill">Campus safety intelligence</span>
+          <h2>From student concern to swift campus action.</h2>
+          <p>
+            Students share suspected food poisoning, poor hygiene, or unsafe storage issues,
+            while admin teams review, escalate, and act before the problem spreads.
+          </p>
+        </div>
+        <div class="hero-stats">
+          <div class="stat-card">
+            <strong id="activeReports">0</strong>
+            <span>Active reports</span>
+          </div>
+          <div class="stat-card">
+            <strong id="riskSpots">0</strong>
+            <span>Hotspots</span>
+          </div>
+          <div class="stat-card">
+            <strong id="responseTime">0m</strong>
+            <span>Avg. response</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="assistant-card">
+        <div class="panel-header compact">
+          <div>
+            <h3>CampusSafe AI assistant</h3>
+            <p>Ask Gemma to summarize incidents, rank risks, or recommend the next action.</p>
+          </div>
+        </div>
+        <form id="assistantForm" class="assistant-form">
+          <textarea id="assistantInput" rows="3" placeholder="Ask: summarize the current risk profile, identify the hotspots, or recommend next steps."></textarea>
+          <div class="assistant-actions">
+            <button class="primary-btn" type="submit">Ask Gemma</button>
+            <span id="assistantStatus" class="assistant-status">Ready</span>
+          </div>
+          <div id="assistantResponse" class="assistant-response">
+            Ask a question to get a live safety summary.
+          </div>
+        </form>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Campus restaurants</h3>
+              <p>Browse safety signals and recent incidents in a calm, focused view.</p>
+            </div>
+            <div class="search-wrap">
+              <input id="searchInput" type="text" placeholder="Search by name or campus" />
+            </div>
+          </div>
+          <div id="restaurantList" class="restaurant-list"></div>
+        </div>
+
+        <div class="side-stack">
+          <div class="panel">
+            <div class="panel-header compact">
+              <div>
+                <h3>Live incident feed</h3>
+                <p>Recent alerts from the student community.</p>
+              </div>
+            </div>
+            <div id="reportFeed" class="report-feed"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header compact">
+              <div>
+                <h3>Why this product matters</h3>
+                <p>A clear channel for community safety without fear of being ignored.</p>
+              </div>
+            </div>
+            <ul class="info-list">
+              <li>Students can flag symptoms, hygiene concerns, and suspected contamination.</li>
+              <li>Admins can review patterns and act before a problem spreads.</li>
+              <li>Dining spots gain trust through transparent, visible accountability.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Review queue</h3>
+              <p>Approve, escalate, or dismiss safety reports.</p>
+            </div>
+          </div>
+          <div id="reviewQueue" class="review-queue"></div>
+        </div>
+
+        <div class="side-stack">
+          <div class="panel">
+            <div class="panel-header compact">
+              <div>
+                <h3>Analytics snapshot</h3>
+                <p>Campus-level safety signals at a glance.</p>
+              </div>
+            </div>
+            <div id="analyticsCards" class="analytics-grid"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header compact">
+              <div>
+                <h3>Risk hotspots</h3>
+                <p>Most urgent locations needing attention.</p>
+              </div>
+            </div>
+            <div id="riskList" class="risk-list"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="reportModal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Share a food-safety report</h3>
+          <button id="closeModalBtn" class="icon-btn" type="button">×</button>
+        </div>
+        <form id="reportForm">
+          <label>
+            Restaurant
+            <select id="restaurantSelect" required></select>
+          </label>
+          <label>
+            Type of concern
+            <select id="concernSelect" required>
+              <option value="Food poisoning">Food poisoning</option>
+              <option value="Poor hygiene">Poor hygiene</option>
+              <option value="Cold storage">Cold storage</option>
+              <option value="Expired food">Expired food</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+          <label>
+            Severity
+            <select id="severitySelect" required>
+              <option value="Low">Low</option>
+              <option value="Medium">Medium</option>
+              <option value="High">High</option>
+            </select>
+          </label>
+          <label>
+            Details
+            <textarea id="detailsInput" rows="4" placeholder="Describe symptoms, conditions, or what you observed."></textarea>
+          </label>
+          <div class="modal-actions">
+            <button type="button" id="cancelBtn" class="secondary-btn">Cancel</button>
+            <button type="submit" class="primary-btn">Submit report</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="app.js?v=2"></script>
+  </body>
+</html>

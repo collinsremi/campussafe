@@ -1,0 +1,2 @@
+# No external Python dependencies are required for this project.
+# The server uses only Python's standard library.
