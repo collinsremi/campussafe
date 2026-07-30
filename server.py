@@ -33,7 +33,12 @@ ENV_VALUES = load_env_file()
 # in your Google AI Studio model picker before you submit. Everything else
 # in this file reads from this constant so the /api/config response and the
 # actual API call can never silently drift apart again.
-GEMMA_MODEL = "gemma-3-27b-it"
+#
+# Gemma 3 is not what's served under this name anymore — Gemma 4 shipped
+# April 2026, and the hosted Gemini API only exposes two Gemma 4 model
+# ids: "gemma-4-31b-it" and "gemma-4-26b-a4b-it" (the lower-latency MoE
+# variant, and the one Google's own docs use as the default example).
+GEMMA_MODEL = "gemma-4-26b-a4b-it"
 
 
 # =============================================================================
@@ -103,11 +108,19 @@ def get_config():
         "enabled": bool(api_key),
         "apiKeyPresent": bool(api_key),
         "model": GEMMA_MODEL,
+        "lastError": LAST_GEMMA_ERROR,
     }
 
 
 def get_api_key():
     return os.getenv("GEMMA_API_KEY") or ENV_VALUES.get("GEMMA_API_KEY", "")
+
+
+# Set by call_gemma_api whenever a call fails, cleared on success. Exposed
+# via /api/config and echoed onto the fallback response so the *why* is
+# visible from the browser/deployed app, not just a terminal you may not
+# have open (e.g. on Render/Railway).
+LAST_GEMMA_ERROR = None
 
 
 # =============================================================================
@@ -117,12 +130,15 @@ def get_api_key():
 # hotspots before it answers, then a second call produces the final text.
 #
 # If GEMMA_API_KEY is missing, unauthorized, or the request otherwise
-# fails, call_gemma_api logs *why* to stderr and returns None, and the
-# caller falls back to build_fallback_response. That fallback existing is
-# correct — it means the product still works if Google's API has a bad
-# minute — but if you keep landing on it, check this server's console
-# output for the logged reason (most commonly: the key in .env isn't a
-# valid Google AI Studio key — those start with "AIza", not "AQ.").
+# fails, call_gemma_api logs *why* to stderr AND stores it in
+# LAST_GEMMA_ERROR, then returns None so the caller falls back to
+# build_fallback_response. That fallback existing is correct — it means
+# the product still works if Google's API has a bad minute — but if you
+# keep landing on it, check /api/config or the assistant's status line
+# in the UI for the real reason. Note: keys starting with "AQ." are
+# current Google AI Studio "auth keys" (the new default, replacing the
+# older "AIza..." standard-key format) — that prefix alone doesn't mean a
+# key is bad.
 # =============================================================================
 
 TOOLS = [{
@@ -157,12 +173,14 @@ def tool_get_hotspots(state):
 
 
 def call_gemma_api(contents, tools=None, system_instruction=None):
+    global LAST_GEMMA_ERROR
     api_key = get_api_key()
     if not api_key:
-        print("[gemma] no GEMMA_API_KEY found in environment or .env — using fallback")
+        LAST_GEMMA_ERROR = "No GEMMA_API_KEY found in environment or .env"
+        print(f"[gemma] {LAST_GEMMA_ERROR} — using fallback")
         return None
 
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMMA_MODEL}:generateContent?key={api_key}"
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMMA_MODEL}:generateContent"
     payload = {"contents": contents, "generationConfig": {"temperature": 0.2}}
     if tools:
         payload["tools"] = tools
@@ -172,11 +190,12 @@ def call_gemma_api(contents, tools=None, system_instruction=None):
     req = urllib_request.Request(
         endpoint,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
         method="POST",
     )
     try:
         with urllib_request.urlopen(req, timeout=20) as response:
+            LAST_GEMMA_ERROR = None
             return json.loads(response.read().decode("utf-8"))
     except urllib_error.HTTPError as e:
         # This is the one that matters most: it tells you *why* Gemma
@@ -185,13 +204,16 @@ def call_gemma_api(contents, tools=None, system_instruction=None):
             detail = e.read().decode("utf-8")
         except Exception:
             detail = "<no body>"
-        print(f"[gemma] HTTP {e.code} calling {GEMMA_MODEL}: {detail}")
+        LAST_GEMMA_ERROR = f"HTTP {e.code} calling {GEMMA_MODEL}: {detail}"
+        print(f"[gemma] {LAST_GEMMA_ERROR}")
         return None
     except urllib_error.URLError as e:
-        print(f"[gemma] network error calling Gemma API: {e.reason}")
+        LAST_GEMMA_ERROR = f"Network error calling Gemma API: {e.reason}"
+        print(f"[gemma] {LAST_GEMMA_ERROR}")
         return None
     except Exception as e:
-        print(f"[gemma] unexpected error calling Gemma API: {e}")
+        LAST_GEMMA_ERROR = f"Unexpected error calling Gemma API: {e}"
+        print(f"[gemma] {LAST_GEMMA_ERROR}")
         return None
 
 
@@ -243,7 +265,9 @@ def build_fallback_response(prompt, reports, restaurants):
 
 
 def query_gemma(prompt, state):
+    global LAST_GEMMA_ERROR
     if not get_api_key():
+        LAST_GEMMA_ERROR = "No GEMMA_API_KEY found in environment or .env"
         return None
 
     system_instruction = (
@@ -280,7 +304,8 @@ def query_gemma(prompt, state):
         text = extract_text(first)
 
     if not text:
-        print("[gemma] call succeeded but returned no text — falling back")
+        LAST_GEMMA_ERROR = "Gemma call succeeded but returned no usable text (empty response or unhandled tool call)"
+        print(f"[gemma] {LAST_GEMMA_ERROR} — falling back")
         return None
     return {"answer": text.strip(), "source": "gemma"}
 
@@ -332,7 +357,11 @@ class Handler(BaseHTTPRequestHandler):
             state = read_state()
             result = query_gemma(prompt, state)
             if not result:
-                result = {"answer": build_fallback_response(prompt, state["reports"], state["restaurants"]), "source": "fallback"}
+                result = {
+                    "answer": build_fallback_response(prompt, state["reports"], state["restaurants"]),
+                    "source": "fallback",
+                    "debug": LAST_GEMMA_ERROR,
+                }
             self.send_json(result)
             return
 
