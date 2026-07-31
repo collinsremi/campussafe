@@ -130,6 +130,7 @@ function renderRestaurants() {
   container.innerHTML = filtered.map((restaurant) => {
     const badgeClass = getBadgeClass(restaurant);
     const stampLabel = badgeClass === 'unrated' ? 'NEW' : restaurant.score;
+    const remarks = restaurant.remarks || { positive: 0, negative: 0 };
     return `
       <article class="placard">
         <div class="placard-top">
@@ -152,6 +153,19 @@ function renderRestaurants() {
           <div class="readout-line">
             <span>Escalations</span>
             <span>${restaurant.alerts}</span>
+          </div>
+        </div>
+        <div class="remark-row">
+          <span class="remark-label">Community remarks</span>
+          <div class="remark-buttons">
+            <button class="remark-btn positive" data-remark="positive" data-id="${restaurant.id}" type="button" aria-label="Leave a positive remark">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 10v11H4a1 1 0 01-1-1v-9a1 1 0 011-1h3zm0 0l4.5-8a2 2 0 013.5 1.5V9h4.2a2 2 0 012 2.3l-1.3 8A2 2 0 0118 21H9a2 2 0 01-2-2" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              <span>${remarks.positive}</span>
+            </button>
+            <button class="remark-btn negative" data-remark="negative" data-id="${restaurant.id}" type="button" aria-label="Leave a negative remark">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17 14V3h3a1 1 0 011 1v9a1 1 0 01-1 1h-3zm0 0l-4.5 8a2 2 0 01-3.5-1.5V15H4.8a2 2 0 01-2-2.3l1.3-8A2 2 0 016 3h9a2 2 0 012 2" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              <span>${remarks.negative}</span>
+            </button>
           </div>
         </div>
       </article>
@@ -363,6 +377,24 @@ async function handleReviewAction(event) {
   }
 }
 
+async function handleRemarkClick(event) {
+  const button = event.target.closest('[data-remark]');
+  if (!button) return;
+  button.disabled = true;
+
+  try {
+    const res = await fetch(`/api/restaurants/${button.dataset.id}/remark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: button.dataset.remark })
+    });
+    appState = await res.json();
+    renderAll();
+  } catch (err) {
+    button.disabled = false;
+  }
+}
+
 function renderAll() {
   renderRestaurants();
   renderReports();
@@ -388,6 +420,7 @@ document.getElementById('registerModal').addEventListener('click', (event) => {
 document.getElementById('registerForm').addEventListener('submit', handleRegisterSubmit);
 
 document.getElementById('searchInput').addEventListener('input', renderRestaurants);
+document.getElementById('restaurantList').addEventListener('click', handleRemarkClick);
 document.getElementById('reviewQueue').addEventListener('click', handleReviewAction);
 document.getElementById('chatFab').addEventListener('click', toggleChat);
 document.getElementById('closeChatBtn').addEventListener('click', closeChat);
