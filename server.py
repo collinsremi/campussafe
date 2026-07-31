@@ -29,6 +29,64 @@ def load_env_file():
 
 ENV_VALUES = load_env_file()
 
+# =============================================================================
+# PERSISTENCE — two modes, chosen automatically:
+#
+# 1. DATABASE_URL set (a Postgres connection string) → state is stored in a
+#    single-row `app_state` table. This is what makes data survive a
+#    redeploy or a free-tier host spinning the instance down and back up —
+#    those wipe the container's local disk, which is exactly why a report
+#    filed yesterday can look like it "vanished" on a plain file-storage
+#    setup. Render's dashboard can create a free Postgres instance directly;
+#    copy its connection string into DATABASE_URL and redeploy.
+# 2. DATABASE_URL not set, or the DB is unreachable → falls back to the
+#    original data.json file exactly as before. Nothing about local
+#    development changes if you don't set this up.
+# =============================================================================
+
+DATABASE_URL = os.getenv("DATABASE_URL") or ENV_VALUES.get("DATABASE_URL", "")
+_DB_UNAVAILABLE_LOGGED = False
+
+
+def _db_connect():
+    import psycopg2
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
+
+
+def _db_ensure_table(conn):
+    with conn.cursor() as cur:
+        cur.execute("CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY, data JSONB NOT NULL)")
+    conn.commit()
+
+
+def _db_read_state():
+    conn = _db_connect()
+    try:
+        _db_ensure_table(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM app_state WHERE id = 1")
+            row = cur.fetchone()
+            if row is None:
+                cur.execute("INSERT INTO app_state (id, data) VALUES (1, %s)", (json.dumps(INITIAL_STATE),))
+                conn.commit()
+                return json.loads(json.dumps(INITIAL_STATE))
+            return row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    finally:
+        conn.close()
+
+
+def _db_write_state(state):
+    conn = _db_connect()
+    try:
+        _db_ensure_table(conn)
+        with conn.cursor() as cur:
+            cur.execute("UPDATE app_state SET data = %s WHERE id = 1", (json.dumps(state),))
+            if cur.rowcount == 0:
+                cur.execute("INSERT INTO app_state (id, data) VALUES (1, %s)", (json.dumps(state),))
+        conn.commit()
+    finally:
+        conn.close()
+
 # Single source of truth for the model — confirm the exact current string
 # in your Google AI Studio model picker before you submit. Everything else
 # in this file reads from this constant so the /api/config response and the
@@ -53,30 +111,49 @@ GEMMA_MODEL = "gemma-4-26b-a4b-it"
 
 INITIAL_STATE = {
     "restaurants": [
-        {"id": 1, "name": "Unique Kitchen", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}},
-        {"id": 2, "name": "Mama Abbas", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}},
-        {"id": 3, "name": "Pop Area", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}},
-        {"id": 4, "name": "Asadel", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}},
-        {"id": 5, "name": "Food Republic", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}},
-        {"id": 6, "name": "Delight", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}}
+        {"id": 1, "name": "Unique Kitchen", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "upvotes": 0, "downvotes": 0},
+        {"id": 2, "name": "Mama Abbas", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "upvotes": 0, "downvotes": 0},
+        {"id": 3, "name": "Pop Area", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "upvotes": 0, "downvotes": 0},
+        {"id": 4, "name": "Asadel", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "upvotes": 0, "downvotes": 0},
+        {"id": 5, "name": "Food Republic", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "upvotes": 0, "downvotes": 0},
+        {"id": 6, "name": "Delight", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "upvotes": 0, "downvotes": 0}
     ],
-    "reports": []
+    "reports": [],
+    # votes[restaurantId][voterId] = "up" | "down" — server-side record of who
+    # voted what, so a person can only ever have one active vote per
+    # restaurant. Not exposed to the client; only the tallies on the
+    # restaurant object are.
+    "votes": {}
 }
 
 
 def read_state():
+    global _DB_UNAVAILABLE_LOGGED
+    if DATABASE_URL:
+        try:
+            with DATA_LOCK:
+                return _db_read_state()
+        except Exception as e:
+            if not _DB_UNAVAILABLE_LOGGED:
+                print(f"[db] read_state failed, falling back to file storage: {e}")
+                _DB_UNAVAILABLE_LOGGED = True
     with DATA_LOCK:
         if not DATA_PATH.exists():
             DATA_PATH.write_text(json.dumps(INITIAL_STATE, indent=2), encoding="utf-8")
-        state = json.loads(DATA_PATH.read_text(encoding="utf-8"))
-        # Back-fill remarks for restaurants saved before this field existed,
-        # so an older data.json on disk doesn't break the remark UI.
-        for restaurant in state.get("restaurants", []):
-            restaurant.setdefault("remarks", {"positive": 0, "negative": 0})
-        return state
+        return json.loads(DATA_PATH.read_text(encoding="utf-8"))
 
 
 def write_state(state):
+    global _DB_UNAVAILABLE_LOGGED
+    if DATABASE_URL:
+        try:
+            with DATA_LOCK:
+                _db_write_state(state)
+            return
+        except Exception as e:
+            if not _DB_UNAVAILABLE_LOGGED:
+                print(f"[db] write_state failed, falling back to file storage: {e}")
+                _DB_UNAVAILABLE_LOGGED = True
     with DATA_LOCK:
         DATA_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
@@ -125,6 +202,7 @@ def get_config():
         "apiKeyPresent": bool(api_key),
         "model": GEMMA_MODEL,
         "lastError": LAST_GEMMA_ERROR,
+        "storage": "database" if (DATABASE_URL and not _DB_UNAVAILABLE_LOGGED) else "file",
     }
 
 
@@ -344,16 +422,19 @@ def query_gemma(prompt, state):
 
     system_instruction = (
         "You are CampusSafe AI, an assistant embedded in a campus food-safety review board. "
-        "Before answering, call get_recent_reports_for_restaurant if the question names a specific "
-        "place, or get_hotspots if it's about overall campus risk. "
-        "If the person's message is short or ambiguous — a single word, a partial name, something "
-        "that doesn't look like a full sentence — treat it as an attempted restaurant name and call "
-        "get_recent_reports_for_restaurant with it directly rather than asking for clarification. "
-        "Only ask a clarifying question if it's truly not a plausible restaurant name and not a "
-        "campus-risk question either. "
-        "Respond with ONLY your final answer: 2-4 concrete sentences, grounded solely in the tool "
-        "data you receive, never inventing incidents. Never show your reasoning, planning, or "
-        "internal deliberation — no phrases like 'let me', 'I should', or 'wait' — just the answer."
+        "First, decide what kind of message this is:\n"
+        "1. Greeting or small talk (e.g. 'hi', 'hello', 'hey', 'thanks', 'how are you') — respond "
+        "warmly and briefly like a helpful assistant, and invite them to ask about a restaurant or "
+        "campus risk. Do NOT call a tool for this.\n"
+        "2. Names or plausibly refers to a specific restaurant, even a partial or misspelled name "
+        "(e.g. 'unique' for 'Unique Kitchen') — call get_recent_reports_for_restaurant with it.\n"
+        "3. Asks about overall/campus-wide risk, hotspots, or 'what should I look at' — call "
+        "get_hotspots.\n"
+        "4. Genuinely unclear and doesn't fit 1-3 — ask one short clarifying question.\n"
+        "Respond with ONLY your final answer: for cases 2-3, 2-4 concrete sentences grounded solely "
+        "in the tool data you receive, never inventing incidents; for case 1, one short friendly "
+        "sentence. Never show your reasoning, planning, or internal deliberation — no phrases like "
+        "'let me', 'I should', or 'wait' — just the answer."
     )
     contents = [{"role": "user", "parts": [{"text": prompt}]}]
 
@@ -505,6 +586,53 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(state)
             return
 
+        if path.startswith("/api/restaurants/") and path.endswith("/rate"):
+            # /api/restaurants/<id>/rate
+            segments = path.split("/")
+            try:
+                restaurant_id = int(segments[3])
+            except (IndexError, ValueError):
+                self.send_json({"error": "Invalid restaurant id"}, status=400)
+                return
+
+            data = self._read_json_body()
+            voter_id = (data.get("voterId") or "").strip()
+            vote = data.get("vote")
+            if vote not in ("up", "down") or not voter_id:
+                self.send_json({"error": "vote must be 'up' or 'down', and voterId is required"}, status=400)
+                return
+
+            state = read_state()
+            restaurant = next((r for r in state["restaurants"] if r["id"] == restaurant_id), None)
+            if not restaurant:
+                self.send_json({"error": "Unknown restaurant"}, status=404)
+                return
+
+            restaurant.setdefault("upvotes", 0)
+            restaurant.setdefault("downvotes", 0)
+            votes = state.setdefault("votes", {})
+            restaurant_votes = votes.setdefault(str(restaurant_id), {})
+            previous_vote = restaurant_votes.get(voter_id)
+
+            # One act per person: clicking the same button again is a no-op
+            # (not a second vote); clicking the other button switches their
+            # vote instead of adding to both tallies. Either way this
+            # person's net contribution to the score is exactly one vote.
+            if previous_vote != vote:
+                if previous_vote == "up":
+                    restaurant["upvotes"] = max(0, restaurant["upvotes"] - 1)
+                elif previous_vote == "down":
+                    restaurant["downvotes"] = max(0, restaurant["downvotes"] - 1)
+                if vote == "up":
+                    restaurant["upvotes"] += 1
+                else:
+                    restaurant["downvotes"] += 1
+                restaurant_votes[voter_id] = vote
+
+            write_state(state)
+            self.send_json(state)
+            return
+
         if path == "/api/restaurants":
             # Onboarding: lets an admin register a new campus restaurant
             # straight from the UI instead of editing seed data by hand.
@@ -531,40 +659,10 @@ class Handler(BaseHTTPRequestHandler):
                 "reports": 0,
                 "score": 0,
                 "alerts": 0,
-                "remarks": {"positive": 0, "negative": 0}
+                "upvotes": 0,
+                "downvotes": 0
             }
             state["restaurants"].append(new_restaurant)
-            write_state(state)
-            self.send_json(state)
-            return
-
-        if path.startswith("/api/restaurants/") and path.endswith("/remark"):
-            # Good/bad remarks are deliberately separate from the formal
-            # incident-report pipeline above: this is lightweight community
-            # sentiment ("service was great" / "meh today"), not a safety
-            # claim, so it never touches score/safety/alerts.
-            parts = path.split("/")
-            try:
-                restaurant_id = int(parts[3])
-            except (IndexError, ValueError):
-                self.send_json({"error": "Invalid restaurant id"}, status=400)
-                return
-
-            data = self._read_json_body()
-            remark_type = data.get("type")
-            if remark_type not in {"positive", "negative"}:
-                self.send_json({"error": "type must be 'positive' or 'negative'"}, status=400)
-                return
-
-            state = read_state()
-            restaurant = next((r for r in state["restaurants"] if r["id"] == restaurant_id), None)
-            if not restaurant:
-                self.send_json({"error": "Restaurant not found"}, status=404)
-                return
-
-            restaurant.setdefault("remarks", {"positive": 0, "negative": 0})
-            restaurant["remarks"][remark_type] += 1
-
             write_state(state)
             self.send_json(state)
             return
@@ -591,4 +689,5 @@ if __name__ == "__main__":
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"CampusSafe server running on http://127.0.0.1:{port}")
     print(f"[gemma] API key present: {bool(get_api_key())} — model: {GEMMA_MODEL}")
+    print(f"[storage] mode: {'database (Postgres)' if DATABASE_URL else 'file (data.json)'}")
     server.serve_forever()
