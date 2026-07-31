@@ -6,7 +6,7 @@
     <title>CampusSafe | FUT Minna Food Safety Register</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css?v=3" />
   </head>
   <body>
@@ -29,26 +29,21 @@
       <section class="manifest">
         <div class="manifest-copy">
           <span class="eyebrow">Campus safety intelligence</span>
-          <h2>Every report, tracked from the first complaint to the last stamp of review.</h2>
-          <p>
-            Students file what they saw and felt at a specific place. Admins review, escalate, or
-            close the loop. Nothing about a campus eatery's standing here is guesswork — it's the
-            running record of what students have actually reported.
-          </p>
+          <h2>Every report, tracked from complaint to review.</h2>
+          <p>Real reports. Real restaurants. No guesswork.</p>
         </div>
-        <div class="hero-seal" aria-hidden="true">CAMPUS SAFETY REGISTER · FUT MINNA</div>
         <div class="ledger-strip">
           <div class="ledger-row">
             <span class="ledger-label">Active reports</span>
-            <strong id="activeReports" class="ledger-value">0</strong>
+            <strong id="activeReports" class="ledger-value" data-value="0">0</strong>
           </div>
           <div class="ledger-row">
             <span class="ledger-label">Hotspots</span>
-            <strong id="riskSpots" class="ledger-value">0</strong>
+            <strong id="riskSpots" class="ledger-value" data-value="0">0</strong>
           </div>
           <div class="ledger-row">
             <span class="ledger-label">Avg. response</span>
-            <strong id="responseTime" class="ledger-value">0m</strong>
+            <strong id="responseTime" class="ledger-value" data-value="0">0m</strong>
           </div>
         </div>
       </section>
