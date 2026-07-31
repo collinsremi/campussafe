@@ -10,9 +10,10 @@ async function refreshState() {
   renderAll();
 }
 
-function getBadgeClass(score) {
-  if (score >= 85) return 'safe';
-  if (score >= 70) return 'watch';
+function getBadgeClass(restaurant) {
+  if (restaurant.reports === 0) return 'unrated';
+  if (restaurant.score < 25) return 'safe';
+  if (restaurant.score < 55) return 'watch';
   return 'alert';
 }
 
@@ -40,16 +41,45 @@ function animateLedgerValue(el, nextValue, suffix = '') {
   requestAnimationFrame(tick);
 }
 
+let chatHistory = [];
+
+function renderChatMessages() {
+  const container = document.getElementById('chatMessages');
+  if (!chatHistory.length) {
+    container.innerHTML = '<div class="chat-empty">Ask about a specific restaurant, or the current campus-wide risk picture.</div>';
+    return;
+  }
+  container.innerHTML = chatHistory.map((msg) => {
+    if (msg.role === 'user') {
+      return `<div class="chat-bubble user">${escapeHtml(msg.text)}</div>`;
+    }
+    if (msg.role === 'thinking') {
+      return `<div class="chat-bubble assistant thinking" id="chatThinking"><span></span><span></span><span></span></div>`;
+    }
+    const caption = msg.source && msg.source !== 'gemma'
+      ? `<div class="chat-caption">local summary — Gemma unavailable</div>`
+      : '';
+    return `<div class="chat-bubble assistant">${escapeHtml(msg.text)}${caption}</div>`;
+  }).join('');
+  container.scrollTop = container.scrollHeight;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 async function submitAssistantQuestion(event) {
   event.preventDefault();
   const input = document.getElementById('assistantInput');
   const prompt = input.value.trim();
   if (!prompt) return;
 
-  const responseBox = document.getElementById('assistantResponse');
-  const statusBox = document.getElementById('assistantStatus');
-  responseBox.textContent = 'Thinking…';
-  statusBox.textContent = 'Contacting Gemma…';
+  chatHistory.push({ role: 'user', text: prompt });
+  chatHistory.push({ role: 'thinking' });
+  renderChatMessages();
+  input.value = '';
 
   try {
     const response = await fetch('/api/assistant', {
@@ -57,18 +87,31 @@ async function submitAssistantQuestion(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt })
     });
-
     const data = await response.json();
-    responseBox.textContent = data.answer || 'No answer returned.';
-    if (data.source === 'gemma') {
-      statusBox.textContent = 'Live Gemma response';
-    } else {
-      statusBox.textContent = data.debug ? `Local fallback — ${data.debug}` : 'Local fallback response';
-    }
+    chatHistory.pop(); // remove the thinking placeholder
+    chatHistory.push({ role: 'assistant', text: data.answer || "I couldn't find an answer to that.", source: data.source });
   } catch (error) {
-    responseBox.textContent = 'The assistant could not reach the service. Please try again.';
-    statusBox.textContent = 'Service unavailable';
+    chatHistory.pop();
+    chatHistory.push({ role: 'assistant', text: 'The assistant could not reach the service. Please try again.' });
   }
+  renderChatMessages();
+}
+
+function openChat() {
+  document.getElementById('chatPanel').classList.remove('hidden');
+  document.getElementById('chatFab').classList.add('active');
+  renderChatMessages();
+  document.getElementById('assistantInput').focus();
+}
+
+function closeChat() {
+  document.getElementById('chatPanel').classList.add('hidden');
+  document.getElementById('chatFab').classList.remove('active');
+}
+
+function toggleChat() {
+  const isHidden = document.getElementById('chatPanel').classList.contains('hidden');
+  if (isHidden) openChat(); else closeChat();
 }
 
 function renderRestaurants() {
@@ -85,7 +128,8 @@ function renderRestaurants() {
   }
 
   container.innerHTML = filtered.map((restaurant) => {
-    const badgeClass = getBadgeClass(restaurant.score);
+    const badgeClass = getBadgeClass(restaurant);
+    const stampLabel = badgeClass === 'unrated' ? 'NEW' : restaurant.score;
     return `
       <article class="placard">
         <div class="placard-top">
@@ -93,7 +137,7 @@ function renderRestaurants() {
             <h4>${restaurant.name}</h4>
             <p>${restaurant.campus}</p>
           </div>
-          <span class="stamp ${badgeClass}">${restaurant.score}</span>
+          <span class="stamp ${badgeClass}">${stampLabel}</span>
         </div>
         <hr class="placard-rule" />
         <div class="placard-readout">
@@ -174,7 +218,7 @@ function renderAnalytics() {
   const responseTime = Math.max(8, 18 - Math.min(10, appState.reports.length));
 
   animateLedgerValue(document.getElementById('activeReports'), appState.reports.filter((report) => report.status !== 'dismissed').length);
-  animateLedgerValue(document.getElementById('riskSpots'), appState.restaurants.filter((restaurant) => restaurant.score < 75).length);
+  animateLedgerValue(document.getElementById('riskSpots'), appState.restaurants.filter((restaurant) => restaurant.reports > 0 && restaurant.score >= 55).length);
   animateLedgerValue(document.getElementById('responseTime'), responseTime, 'm');
 
   const analytics = document.getElementById('analyticsCards');
@@ -194,18 +238,22 @@ function renderAnalytics() {
   `;
 
   const riskList = document.getElementById('riskList');
-  const ranked = [...appState.restaurants].sort((a, b) => a.score - b.score).slice(0, 3);
-  riskList.innerHTML = ranked.map((restaurant) => `
-    <div class="risk-card">
-      <div class="restaurant-top">
-        <div>
-          <h4>${restaurant.name}</h4>
-          <p>${restaurant.campus}</p>
+  const ranked = appState.restaurants.filter((r) => r.reports > 0).sort((a, b) => b.score - a.score).slice(0, 3);
+  if (!ranked.length) {
+    riskList.innerHTML = '<div class="empty-state">No incidents reported yet.</div>';
+  } else {
+    riskList.innerHTML = ranked.map((restaurant) => `
+      <div class="risk-card">
+        <div class="restaurant-top">
+          <div>
+            <h4>${restaurant.name}</h4>
+            <p>${restaurant.campus}</p>
+          </div>
+          <span class="badge ${getBadgeClass(restaurant)}">${restaurant.score}</span>
         </div>
-        <span class="badge ${getBadgeClass(restaurant.score)}">${restaurant.score}</span>
       </div>
-    </div>
-  `).join('');
+    `).join('');
+  }
 }
 
 function populateRestaurantOptions() {
@@ -341,6 +389,8 @@ document.getElementById('registerForm').addEventListener('submit', handleRegiste
 
 document.getElementById('searchInput').addEventListener('input', renderRestaurants);
 document.getElementById('reviewQueue').addEventListener('click', handleReviewAction);
+document.getElementById('chatFab').addEventListener('click', toggleChat);
+document.getElementById('closeChatBtn').addEventListener('click', closeChat);
 document.getElementById('assistantForm').addEventListener('submit', submitAssistantQuestion);
 
 // Orchestrated entrance: the masthead/hero/console are pure CSS (animate on
