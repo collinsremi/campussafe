@@ -28,6 +28,10 @@ Built for the Build with Gemma: AI for Africa Hackathon.
   If the Gemma call fails for any reason (missing/invalid key, quota,
   network), the server logs the exact HTTP error to its console and the
   assistant falls back to a local rule-based summary instead of breaking
+- Community remarks — a quick thumbs up/down on any restaurant card,
+  separate from the formal incident-report pipeline. This is lightweight
+  sentiment ("service was good today"), not a safety claim, so it never
+  affects a restaurant's score or Safe/Watch/Alert status
 - Shared state across all users — no login required, no per-browser data silos
 
 ## Tech stack
@@ -91,6 +95,7 @@ campussafe/
 | `/api/reports` | POST | Submit a new incident report |
 | `/api/reports/<id>/review` | POST | Approve, escalate, or dismiss a report |
 | `/api/restaurants` | POST | Register a new restaurant onto the shared board |
+| `/api/restaurants/<id>/remark` | POST | Leave a quick positive/negative community remark |
 | `/api/assistant` | POST | Ask Gemma a safety question |
 | `/api/config` | GET | Current model/config status |
 
@@ -139,6 +144,5 @@ references `gemma-3-27b-it`, update `GEMMA_MODEL` in `server.py`.
 - Photo evidence support (multimodal)
 - Role-based access for admin actions
 - Anonymous reporting option
-
 - Role-based access for admin actions
 - Anonymous reporting option
