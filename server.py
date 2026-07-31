@@ -193,33 +193,62 @@ def call_gemma_api(contents, tools=None, system_instruction=None):
         return None
 
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMMA_MODEL}:generateContent"
-    # thinkingBudget: 0 asks the model to skip visible chain-of-thought
-    # entirely. If this model/API combination ignores or rejects the field,
-    # the reasoning-leak guard in query_gemma() catches it as a second line
-    # of defense, so this is safe to attempt either way.
-    payload = {"contents": contents, "generationConfig": {"temperature": 0.2, "thinkingConfig": {"thinkingBudget": 0}}}
-    if tools:
-        payload["tools"] = tools
-    if system_instruction:
-        payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
-    req = urllib_request.Request(
-        endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-        method="POST",
-    )
-    try:
+    def build_payload(include_thinking_config):
+        generation_config = {"temperature": 0.2}
+        if include_thinking_config:
+            # thinkingBudget: 0 asks the model to skip visible chain-of-thought
+            # entirely. Not every Gemma model/API version accepts this field —
+            # if it gets rejected, attempt_request() below retries without it
+            # rather than letting every single call fail.
+            generation_config["thinkingConfig"] = {"thinkingBudget": 0}
+        payload = {"contents": contents, "generationConfig": generation_config}
+        if tools:
+            payload["tools"] = tools
+        if system_instruction:
+            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+        return payload
+
+    def attempt_request(include_thinking_config):
+        req = urllib_request.Request(
+            endpoint,
+            data=json.dumps(build_payload(include_thinking_config)).encode("utf-8"),
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+            method="POST",
+        )
         with urllib_request.urlopen(req, timeout=20) as response:
-            LAST_GEMMA_ERROR = None
             return json.loads(response.read().decode("utf-8"))
+
+    try:
+        result = attempt_request(True)
+        LAST_GEMMA_ERROR = None
+        return result
     except urllib_error.HTTPError as e:
-        # This is the one that matters most: it tells you *why* Gemma
-        # rejected the call (bad key, wrong model name, quota, etc).
         try:
             detail = e.read().decode("utf-8")
         except Exception:
             detail = "<no body>"
+
+        if e.code == 400:
+            # Most likely cause of a 400 here is thinkingConfig itself not
+            # being recognized by this model — retry once without it before
+            # giving up, so a live answer still comes through.
+            print(f"[gemma] HTTP 400 with thinkingConfig ({detail[:200]}) — retrying without it")
+            try:
+                result = attempt_request(False)
+                LAST_GEMMA_ERROR = None
+                return result
+            except urllib_error.HTTPError as e2:
+                try:
+                    detail2 = e2.read().decode("utf-8")
+                except Exception:
+                    detail2 = "<no body>"
+                LAST_GEMMA_ERROR = f"HTTP {e2.code} calling {GEMMA_MODEL}: {detail2}"
+                print(f"[gemma] {LAST_GEMMA_ERROR}")
+                return None
+
+        # This is the one that matters most for any other failure: it tells
+        # you *why* Gemma rejected the call (bad key, wrong model name, quota).
         LAST_GEMMA_ERROR = f"HTTP {e.code} calling {GEMMA_MODEL}: {detail}"
         print(f"[gemma] {LAST_GEMMA_ERROR}")
         return None
