@@ -53,18 +53,14 @@ GEMMA_MODEL = "gemma-4-26b-a4b-it"
 
 INITIAL_STATE = {
     "restaurants": [
-        {"id": 1, "name": "Unique Kitchen", "campus": "Gidan Kwano Campus", "rating": 4.6, "safety": "Safe", "reports": 2, "score": 91, "alerts": 0},
-        {"id": 2, "name": "Mama Abbas", "campus": "Gidan Kwano Campus", "rating": 4.4, "safety": "Watch", "reports": 3, "score": 84, "alerts": 1},
-        {"id": 3, "name": "Pop Area", "campus": "Bosso Campus", "rating": 4.1, "safety": "Alert", "reports": 6, "score": 69, "alerts": 3},
-        {"id": 4, "name": "Asadel", "campus": "Bosso Campus", "rating": 4.7, "safety": "Safe", "reports": 1, "score": 95, "alerts": 0},
-        {"id": 5, "name": "Food Republic", "campus": "Gidan Kwano Campus", "rating": 3.9, "safety": "Watch", "reports": 5, "score": 73, "alerts": 2},
-        {"id": 6, "name": "Delight", "campus": "Bosso Campus", "rating": 4.5, "safety": "Safe", "reports": 2, "score": 88, "alerts": 0}
+        {"id": 1, "name": "Unique Kitchen", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0},
+        {"id": 2, "name": "Mama Abbas", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0},
+        {"id": 3, "name": "Pop Area", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0},
+        {"id": 4, "name": "Asadel", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0},
+        {"id": 5, "name": "Food Republic", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0},
+        {"id": 6, "name": "Delight", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0}
     ],
-    "reports": [
-        {"id": 1, "restaurantId": 3, "restaurant": "Pop Area", "concern": "Food poisoning", "severity": "High", "details": "Several students reported nausea after the evening special.", "time": "12m ago", "status": "pending"},
-        {"id": 2, "restaurantId": 5, "restaurant": "Food Republic", "concern": "Cold storage", "severity": "Medium", "details": "A staff member noted that stew was left out too long before serving.", "time": "43m ago", "status": "reviewed"},
-        {"id": 3, "restaurantId": 2, "restaurant": "Mama Abbas", "concern": "Poor hygiene", "severity": "Low", "details": "Cutlery station lacked regular sanitizing during the lunch rush.", "time": "1h ago", "status": "pending"}
-    ]
+    "reports": []
 }
 
 
@@ -80,8 +76,23 @@ def write_state(state):
         DATA_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
+# Score now means accumulated risk, not remaining trust: every restaurant
+# starts at 0 with no history, and reports push it up as evidence comes in.
+# A restaurant with zero reports is "Unrated" — it hasn't earned an Alert
+# any more than it's earned a Safe; there's just no data yet, and that's a
+# meaningfully different thing to say about a real business.
+SEVERITY_RISK_WEIGHT = {"High": 30, "Medium": 15, "Low": 5}
+
+
 def recompute_safety(restaurant):
-    restaurant["safety"] = "Safe" if restaurant["score"] >= 85 else "Watch" if restaurant["score"] >= 70 else "Alert"
+    if restaurant["reports"] == 0:
+        restaurant["safety"] = "Unrated"
+    elif restaurant["score"] < 25:
+        restaurant["safety"] = "Safe"
+    elif restaurant["score"] < 55:
+        restaurant["safety"] = "Watch"
+    else:
+        restaurant["safety"] = "Alert"
 
 
 def get_content_type(path: str) -> str:
@@ -168,7 +179,8 @@ def tool_get_recent_reports_for_restaurant(state, restaurant_name):
 
 
 def tool_get_hotspots(state):
-    ranked = sorted(state["restaurants"], key=lambda r: r["score"])[:3]
+    rated = [r for r in state["restaurants"] if r["reports"] > 0]
+    ranked = sorted(rated, key=lambda r: r["score"], reverse=True)[:3]
     return {"hotspots": [{"name": r["name"], "score": r["score"], "campus": r["campus"]} for r in ranked]}
 
 
@@ -181,7 +193,11 @@ def call_gemma_api(contents, tools=None, system_instruction=None):
         return None
 
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMMA_MODEL}:generateContent"
-    payload = {"contents": contents, "generationConfig": {"temperature": 0.2}}
+    # thinkingBudget: 0 asks the model to skip visible chain-of-thought
+    # entirely. If this model/API combination ignores or rejects the field,
+    # the reasoning-leak guard in query_gemma() catches it as a second line
+    # of defense, so this is safe to attempt either way.
+    payload = {"contents": contents, "generationConfig": {"temperature": 0.2, "thinkingConfig": {"thinkingBudget": 0}}}
     if tools:
         payload["tools"] = tools
     if system_instruction:
@@ -224,7 +240,27 @@ def extract_text(body):
     if not candidates:
         return ""
     parts = candidates[0].get("content", {}).get("parts") or []
-    return " ".join(p.get("text", "") for p in parts if p.get("text"))
+    # Thinking-capable models return reasoning as separate parts marked
+    # "thought": true. Joining those in with the real answer is exactly
+    # what was leaking raw chain-of-thought into the UI — only the
+    # non-thought parts are the actual answer.
+    return " ".join(p.get("text", "") for p in parts if p.get("text") and not p.get("thought"))
+
+
+REASONING_LEAK_MARKERS = (
+    "the user provided", "let me", "let's", "i should", "wait,", "i'll just",
+    "i need to", "hmm,", "as an ai", "i'll respond", "actually, i'll"
+)
+
+
+def looks_like_leaked_reasoning(text):
+    # Belt-and-suspenders on top of the thought-part filtering above: if a
+    # response still reads like internal deliberation (multiple planning
+    # phrases, or just unreasonably long for a 2-4 sentence answer), treat
+    # it as unusable rather than show it to a student or admin.
+    lowered = text.lower()
+    hits = sum(1 for marker in REASONING_LEAK_MARKERS if marker in lowered)
+    return hits >= 2 or len(text) > 700
 
 
 def extract_function_call(body):
@@ -244,7 +280,9 @@ def build_fallback_response(prompt, reports, restaurants):
     prompt_lower = (prompt or "").lower()
     open_reports = [report for report in reports if report.get("status") != "dismissed"]
     urgent_reports = [report for report in open_reports if report.get("severity") in {"High", "Medium"}]
-    hotspot_names = [restaurant.get("name") for restaurant in sorted(restaurants, key=lambda item: item.get("score", 100))[:3]]
+    rated = [r for r in restaurants if r.get("reports", 0) > 0]
+    hotspot_names = [r.get("name") for r in sorted(rated, key=lambda item: item.get("score", 0), reverse=True)[:3]]
+    hotspot_text = ', '.join(hotspot_names) if hotspot_names else "none yet — no restaurant has an active report"
     urgent_details = [
         f"{item.get('restaurant', 'unknown')} ({item.get('concern', 'concern')} • {item.get('severity', 'unknown')})"
         for item in urgent_reports[:3]
@@ -252,7 +290,7 @@ def build_fallback_response(prompt, reports, restaurants):
     if "risk" in prompt_lower or "urgent" in prompt_lower:
         return (
             f"The most urgent signals are {', '.join(urgent_details) or 'no active urgent reports'} with {len(urgent_reports)} active high/medium severity items. "
-            f"The lowest-scoring venues are {', '.join(hotspot_names)}."
+            f"The highest-risk venues right now are {hotspot_text}."
         )
     if "recommend" in prompt_lower or "next" in prompt_lower or "what should" in prompt_lower:
         return (
@@ -260,7 +298,7 @@ def build_fallback_response(prompt, reports, restaurants):
         )
     return (
         f"I reviewed {len(open_reports)} active reports and found the strongest concerns around {', '.join(urgent_details) or 'the current campus feed'}. "
-        f"The riskiest venues currently appear to be {', '.join(hotspot_names)}."
+        f"The highest-risk venues right now are {hotspot_text}."
     )
 
 
@@ -273,8 +311,15 @@ def query_gemma(prompt, state):
     system_instruction = (
         "You are CampusSafe AI, an assistant embedded in a campus food-safety review board. "
         "Before answering, call get_recent_reports_for_restaurant if the question names a specific "
-        "place, or get_hotspots if it's about overall campus risk. Keep the final answer to 2-4 "
-        "sentences, concrete, and grounded only in the tool data you receive — never invent incidents."
+        "place, or get_hotspots if it's about overall campus risk. "
+        "If the person's message is short or ambiguous — a single word, a partial name, something "
+        "that doesn't look like a full sentence — treat it as an attempted restaurant name and call "
+        "get_recent_reports_for_restaurant with it directly rather than asking for clarification. "
+        "Only ask a clarifying question if it's truly not a plausible restaurant name and not a "
+        "campus-risk question either. "
+        "Respond with ONLY your final answer: 2-4 concrete sentences, grounded solely in the tool "
+        "data you receive, never inventing incidents. Never show your reasoning, planning, or "
+        "internal deliberation — no phrases like 'let me', 'I should', or 'wait' — just the answer."
     )
     contents = [{"role": "user", "parts": [{"text": prompt}]}]
 
@@ -306,6 +351,10 @@ def query_gemma(prompt, state):
     if not text:
         LAST_GEMMA_ERROR = "Gemma call succeeded but returned no usable text (empty response or unhandled tool call)"
         print(f"[gemma] {LAST_GEMMA_ERROR} — falling back")
+        return None
+    if looks_like_leaked_reasoning(text):
+        LAST_GEMMA_ERROR = "Gemma response looked like leaked reasoning rather than a final answer — discarded"
+        print(f"[gemma] {LAST_GEMMA_ERROR}: {text[:200]}...")
         return None
     return {"answer": text.strip(), "source": "gemma"}
 
@@ -385,11 +434,10 @@ class Handler(BaseHTTPRequestHandler):
             }
             state["reports"].insert(0, new_report)
             restaurant["reports"] += 1
+            weight = SEVERITY_RISK_WEIGHT.get(new_report["severity"], 5)
+            restaurant["score"] = min(100, restaurant["score"] + weight)
             if new_report["severity"] == "High":
-                restaurant["score"] = max(30, restaurant["score"] - 12)
                 restaurant["alerts"] += 1
-            elif new_report["severity"] == "Medium":
-                restaurant["score"] = max(30, restaurant["score"] - 6)
             recompute_safety(restaurant)
 
             write_state(state)
@@ -412,10 +460,11 @@ class Handler(BaseHTTPRequestHandler):
                 report["status"] = "reviewed"
             elif action == "escalate":
                 report["status"] = "escalated"
-                restaurant["score"] = max(20, restaurant["score"] - 10)
+                restaurant["score"] = min(100, restaurant["score"] + 15)
                 restaurant["alerts"] += 1
             elif action == "dismiss":
                 report["status"] = "dismissed"
+                restaurant["score"] = max(0, restaurant["score"] - 10)
             recompute_safety(restaurant)
 
             write_state(state)
@@ -444,9 +493,9 @@ class Handler(BaseHTTPRequestHandler):
                 "name": name,
                 "campus": campus,
                 "rating": 0,
-                "safety": "Safe",
+                "safety": "Unrated",
                 "reports": 0,
-                "score": 100,
+                "score": 0,
                 "alerts": 0
             }
             state["restaurants"].append(new_restaurant)
