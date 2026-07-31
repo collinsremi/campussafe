@@ -1,2 +1,5 @@
-# No external Python dependencies are required for this project.
-# The server uses only Python's standard library.
+# psycopg2-binary is only used if you set DATABASE_URL (see README —
+# "Persistent storage"). Without DATABASE_URL, the app runs on the
+# stdlib-only file storage exactly as before; this package just needs to
+# be installed for that optional path to work when you do turn it on.
+psycopg2-binary
