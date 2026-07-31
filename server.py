@@ -53,12 +53,12 @@ GEMMA_MODEL = "gemma-4-26b-a4b-it"
 
 INITIAL_STATE = {
     "restaurants": [
-        {"id": 1, "name": "Unique Kitchen", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0},
-        {"id": 2, "name": "Mama Abbas", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0},
-        {"id": 3, "name": "Pop Area", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0},
-        {"id": 4, "name": "Asadel", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0},
-        {"id": 5, "name": "Food Republic", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0},
-        {"id": 6, "name": "Delight", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0}
+        {"id": 1, "name": "Unique Kitchen", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}},
+        {"id": 2, "name": "Mama Abbas", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}},
+        {"id": 3, "name": "Pop Area", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}},
+        {"id": 4, "name": "Asadel", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}},
+        {"id": 5, "name": "Food Republic", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}},
+        {"id": 6, "name": "Delight", "campus": "GK", "rating": 0, "safety": "Unrated", "reports": 0, "score": 0, "alerts": 0, "remarks": {"positive": 0, "negative": 0}}
     ],
     "reports": []
 }
@@ -68,7 +68,12 @@ def read_state():
     with DATA_LOCK:
         if not DATA_PATH.exists():
             DATA_PATH.write_text(json.dumps(INITIAL_STATE, indent=2), encoding="utf-8")
-        return json.loads(DATA_PATH.read_text(encoding="utf-8"))
+        state = json.loads(DATA_PATH.read_text(encoding="utf-8"))
+        # Back-fill remarks for restaurants saved before this field existed,
+        # so an older data.json on disk doesn't break the remark UI.
+        for restaurant in state.get("restaurants", []):
+            restaurant.setdefault("remarks", {"positive": 0, "negative": 0})
+        return state
 
 
 def write_state(state):
@@ -525,9 +530,41 @@ class Handler(BaseHTTPRequestHandler):
                 "safety": "Unrated",
                 "reports": 0,
                 "score": 0,
-                "alerts": 0
+                "alerts": 0,
+                "remarks": {"positive": 0, "negative": 0}
             }
             state["restaurants"].append(new_restaurant)
+            write_state(state)
+            self.send_json(state)
+            return
+
+        if path.startswith("/api/restaurants/") and path.endswith("/remark"):
+            # Good/bad remarks are deliberately separate from the formal
+            # incident-report pipeline above: this is lightweight community
+            # sentiment ("service was great" / "meh today"), not a safety
+            # claim, so it never touches score/safety/alerts.
+            parts = path.split("/")
+            try:
+                restaurant_id = int(parts[3])
+            except (IndexError, ValueError):
+                self.send_json({"error": "Invalid restaurant id"}, status=400)
+                return
+
+            data = self._read_json_body()
+            remark_type = data.get("type")
+            if remark_type not in {"positive", "negative"}:
+                self.send_json({"error": "type must be 'positive' or 'negative'"}, status=400)
+                return
+
+            state = read_state()
+            restaurant = next((r for r in state["restaurants"] if r["id"] == restaurant_id), None)
+            if not restaurant:
+                self.send_json({"error": "Restaurant not found"}, status=404)
+                return
+
+            restaurant.setdefault("remarks", {"positive": 0, "negative": 0})
+            restaurant["remarks"][remark_type] += 1
+
             write_state(state)
             self.send_json(state)
             return
