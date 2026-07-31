@@ -2,6 +2,7 @@
 
 **Live app:** [campussafe.onrender.com](https://campussafe.onrender.com)
 
+
 A shared food-safety board for campus life. Students report food poisoning,
 hygiene issues, or unsafe storage at campus restaurants; admins review and
 escalate; Gemma helps surface patterns and answer safety questions across
@@ -11,19 +12,22 @@ Built for the Build with Gemma: AI for Africa Hackathon.
 
 ## Features
 
-- Live safety board with per-restaurant scores and status (Safe / Watch / Alert)
-- Real FUT Minna restaurants seeded on launch: Unique Kitchen, Mama Abbas,
+- Live safety board with per-restaurant status: **Unrated** until the first
+  report comes in, then **Safe / Watch / Alert** based on accumulated risk
+  from actual reports — no restaurant starts with an assumed score
+- Real GK restaurants seeded on launch: Unique Kitchen, Mama Abbas,
   Pop Area, Asadel, Food Republic, Delight — plus a "Register a restaurant"
   flow so admins can add more without touching code
 - Student incident reporting (concern type, severity, details)
 - Admin review queue — approve, escalate, or dismiss reports
 - Campus-wide analytics: active reports, hotspots, response time, top concern patterns
-- Gemma-powered assistant that answers safety questions using function calling —
-  it decides whether to pull recent reports for a specific restaurant or
-  the current campus-wide hotspots before answering. If the Gemma call
-  fails for any reason (missing/invalid key, quota, network), the server
-  logs the exact HTTP error to its console and the assistant falls back
-  to a local rule-based summary instead of breaking
+- Floating chat assistant (bottom-right) powered by Gemma with function
+  calling — it decides whether to pull recent reports for a specific
+  restaurant or the current campus-wide hotspots before answering, and
+  keeps a running conversation instead of overwriting a single response box.
+  If the Gemma call fails for any reason (missing/invalid key, quota,
+  network), the server logs the exact HTTP error to its console and the
+  assistant falls back to a local rule-based summary instead of breaking
 - Shared state across all users — no login required, no per-browser data silos
 
 ## Tech stack
@@ -90,7 +94,33 @@ campussafe/
 | `/api/assistant` | POST | Ask Gemma a safety question |
 | `/api/config` | GET | Current model/config status |
 
-### Debugging the assistant
+## Scoring model
+
+A restaurant's `score` is accumulated risk, not remaining trust — every
+restaurant starts at **0** with no history. Reports push it up by severity
+(Low +5, Medium +15, High +30, capped at 100); escalating a report adds
++15, dismissing one removes 10. Status is derived from that:
+
+| Reports | Score | Status |
+|---|---|---|
+| 0 | — | Unrated |
+| >0 | < 25 | Safe |
+| >0 | 25–54 | Watch |
+| >0 | ≥ 55 | Alert |
+
+A restaurant with zero reports is Unrated, not Safe and not Alert — there's
+just no data yet, and that's a meaningfully different claim to make about
+a real business.
+
+## Debugging the assistant
+
+If a response ever looks like raw reasoning instead of a clean answer
+(long, rambling, talking about what tool to call rather than just calling
+it), check the server console — `query_gemma()` discards anything that
+matches that pattern and falls back automatically, logging why. This
+project explicitly disables the model's visible thinking via
+`thinkingConfig` and filters out any `"thought": true` parts from the
+response, so it shouldn't happen, but the guard is there either way.
 
 If `/api/assistant` keeps returning `"source": "fallback"`, run the server
 in a terminal (`python3 server.py`) and ask a question — any failed Gemma
@@ -107,5 +137,8 @@ references `gemma-3-27b-it`, update `GEMMA_MODEL` in `server.py`.
 - Formal complaint drafting for direct handoff to Student Affairs / campus health
 - Emergency-symptom guardrail for severe reports
 - Photo evidence support (multimodal)
+- Role-based access for admin actions
+- Anonymous reporting option
+
 - Role-based access for admin actions
 - Anonymous reporting option
