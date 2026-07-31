@@ -52,28 +52,6 @@
         </div>
       </section>
 
-      <section class="console">
-        <div class="console-header">
-          <div>
-            <span class="console-tag">CampusSafe AI</span>
-            <p>Ask it to summarize the risk picture, name the hotspots, or recommend a next move — it pulls live report data before it answers.</p>
-          </div>
-        </div>
-        <form id="assistantForm" class="console-form">
-          <div class="console-input-row">
-            <span class="prompt-marker">&gt;</span>
-            <textarea id="assistantInput" rows="2" placeholder="e.g. Which places need attention today, and why?"></textarea>
-          </div>
-          <div class="console-actions">
-            <button class="primary-btn" type="submit">Ask</button>
-            <span id="assistantStatus" class="console-status">Ready</span>
-          </div>
-          <div id="assistantResponse" class="console-response">
-            Ask a question to get a live safety summary.
-          </div>
-        </form>
-      </section>
-
       <section class="dashboard-grid">
         <div class="panel">
           <div class="panel-header">
@@ -145,10 +123,31 @@
           </div>
         </div>
       </section>
+    </div>
 
-      <footer class="page-footer">
-        <span>CampusSafe — built for the Build with Gemma: AI for Africa Hackathon.</span>
-      </footer>
+    <button id="chatFab" class="chat-fab" type="button" aria-label="Open CampusSafe AI assistant">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 4h16v12H8l-4 4V4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+      </svg>
+    </button>
+
+    <div id="chatPanel" class="chat-panel hidden">
+      <div class="chat-panel-header">
+        <div>
+          <span class="chat-panel-tag">CampusSafe AI</span>
+          <p>Grounded in live report data — not a guess.</p>
+        </div>
+        <button id="closeChatBtn" class="icon-btn" type="button">×</button>
+      </div>
+      <div id="chatMessages" class="chat-messages"></div>
+      <form id="assistantForm" class="chat-input-row">
+        <textarea id="assistantInput" rows="1" placeholder="Ask about a restaurant or campus risk…"></textarea>
+        <button class="chat-send-btn" type="submit" aria-label="Send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 12h16m0 0l-6-6m6 6l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </form>
     </div>
 
     <div id="reportModal" class="modal hidden">
@@ -205,9 +204,9 @@
           </label>
           <label>
             Campus location
-            <input id="restaurantCampusInput" type="text" placeholder="e.g. Gidan Kwano Campus" required />
+            <input id="restaurantCampusInput" type="text" placeholder="e.g. GK" required />
           </label>
-          <p class="field-note">New venues join the board at a clean 100/100 score until reports come in.</p>
+          <p class="field-note">New venues join the board Unrated until the first report comes in — no restaurant starts with an assumed score.</p>
           <div class="modal-actions">
             <button type="button" id="cancelRegisterBtn" class="secondary-btn">Cancel</button>
             <button type="submit" class="primary-btn">Add to board</button>
